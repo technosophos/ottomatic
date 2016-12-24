@@ -2,6 +2,7 @@ package ottomatic
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -50,7 +51,12 @@ func Register(n string, v interface{}, o *otto.Otto) error {
 			}
 		}
 		return nil
+	case reflect.Func:
+		fmt.Printf("Setting function %s=%s(%v)\n", n, val.Kind(), v)
+		o.Set(n, v)
+		return nil
 	default:
+		fmt.Printf("Setting %s=%s(%v)\n", n, val.Kind(), v)
 		o.Set(n, v)
 		return nil
 	}
