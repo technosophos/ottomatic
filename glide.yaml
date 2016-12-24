@@ -1,0 +1,3 @@
+package: github.com/technosophos/ottomatic
+import:
+- package: github.com/robertkrimen/otto
