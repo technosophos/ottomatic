@@ -20,6 +20,7 @@ type ottoTag struct {
 	omit bool
 }
 
+// ErrUnsupportedKind indicates that a given kind is not supported by the registry.
 var ErrUnsupportedKind = errors.New("unsupported kind")
 
 // Undefined is the error version of otto.Value == Undefined.
@@ -113,6 +114,8 @@ func gettag(field *reflect.StructField) ottoTag {
 // This function does not support fetching values whose keys contain dots.
 // Dots are used exclusively as namespace separators. To fetch keys with dots
 // in their names, use one of Otto's built-in Get functions.
+//
+// DeepGet does not provide a way to reference an array index.
 //
 // DeepGet returns an ErrUndefined if any object in the requested key
 // does not exist (i.e. is undefined) in the JavaScript runtime. It also
