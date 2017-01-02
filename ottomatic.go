@@ -1,3 +1,42 @@
+/*Package ottomatic binds Go values to JavaScript objects.
+
+Following the tradition of the Go's native `encoding/*` packages, this package
+uses Go struct annotations to bind a Go type (even complex types) to the
+Otto JavaScript runtime.
+
+The simplest way to use this library is to annotate your structs and then use
+the ottomatic.Register function:
+
+	err := ottomatic.Register("myobj", myValue, ottoRuntime)
+
+THE 'otto' ANNOTATION
+
+The `otto` annotation follows the general tag convention used in Go:
+
+	FIELD TYPE `otto:"NAME,PARAM,PARAM"`
+
+NAME is required, and all PARAMs are optional.
+
+	- `NAME` is the name by which the JavaScript runtime will be able to
+	  access the object.
+	  - The special name `-` indicates that this field should be ignored,
+		and not exposed inside of the JavaScript runtime.
+	- `PARAM` is always optional, and is list-like. The following parameters
+	  are defined:
+	  - `alias=ALTNAME` (example: `otto:"kubernetes,alias=k8s"`) instructs
+		ottomatic to register this object again, but under the given
+		alternative name. If the field is a pointer, both handles will
+		point to the same object. In any other case, each handle will have
+		its own target value. _More than one alias may be specified._
+	  - `omitempty`: Reserved for future use.
+	  - `returns`, `returns=`, `throws`, and `throws=` reserved for future use.
+
+All unknown params are silently ignored.
+
+If no annotation is specified and the field is exportable (i.e. the Go
+field name starts with an uppercase letter), the field will be exported
+to the JavaScript runtime using its Go name.
+*/
 package ottomatic
 
 import (
@@ -16,8 +55,9 @@ import (
 var OttoTagName = "otto"
 
 type ottoTag struct {
-	name string
-	omit bool
+	name    string
+	omit    bool
+	aliases []string
 }
 
 // ErrUnsupportedKind indicates that a given kind is not supported by the registry.
@@ -47,6 +87,8 @@ type ObjectGetter interface {
 //
 // This will attempt to bind v in its entirety. If v is a struct, this will bind
 // it according to the 'ott:' tags on fields.
+//
+// Register should be used for root objects.
 func Register(n string, v interface{}, o *otto.Otto) error {
 	// Here, Otto is an ObjectSetter, so we can bind to the root namespace by
 	// binding directly to the Otto runtime.
@@ -57,7 +99,25 @@ func Register(n string, v interface{}, o *otto.Otto) error {
 //
 // This behaves like Register, with the additional stipulation that it binds
 // to the passed-in object instead of to the root of the Otto runtime's namespace.
+//
+// This is used to bind a Go value to a non-root JavaScript object. Note that
+// the injection of `obj` into `o` is not handled here. It must be explicitly
+// done via one of Otto's `Set` methods.
 func RegisterTo(n string, v interface{}, o *otto.Otto, obj ObjectSetter) error {
+	return RegisterToAliases(n, v, o, obj, []string{})
+}
+
+// RegisterToAliases registers n to v on object obj, and then aliases to n.
+//
+// Each alias in n is pointed to the same v. If v is a value, then aliaes can
+// independently modify the value. If v is a pointer, then n and all aliases will
+// dereference the same object. This is intended to work the same way that
+// pure JavaScript aliasing works.
+//
+// This is only used when you need to register the same object under multiple
+// JavaScript names, such as when `foo.bar` and `foo.baz` should point to the
+// same thing.
+func RegisterToAliases(n string, v interface{}, o *otto.Otto, obj ObjectSetter, aliases []string) error {
 	val := reflect.Indirect(reflect.ValueOf(v))
 	switch val.Kind() {
 	// TODO: are reflect.Interface, reflect.Ptr, and reflect.Uintptr okay?
@@ -75,14 +135,21 @@ func RegisterTo(n string, v interface{}, o *otto.Otto, obj ObjectSetter) error {
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			ot := gettag(&f)
+			iface := val.Field(i).Interface()
 			if !ot.omit {
-				RegisterTo(ot.name, val.Field(i).Interface(), o, s)
+				RegisterToAliases(ot.name, iface, o, s, ot.aliases)
 			}
 		}
 		obj.Set(n, s)
+		for _, a := range aliases {
+			obj.Set(a, s)
+		}
 		return nil
 	default:
 		obj.Set(n, v)
+		for _, a := range aliases {
+			obj.Set(a, v)
+		}
 		return nil
 	}
 }
@@ -101,7 +168,17 @@ func gettag(field *reflect.StructField) ottoTag {
 	if n == "-" {
 		return ottoTag{name: field.Name, omit: true}
 	}
-	return ottoTag{name: n}
+	ot := ottoTag{name: n}
+	if len(data) == 1 {
+		return ot
+	}
+	for _, k := range data[1:] {
+		switch item := k; {
+		case strings.HasPrefix(item, "alias="):
+			ot.aliases = append(ot.aliases, strings.TrimPrefix(item, "alias="))
+		}
+	}
+	return ot
 }
 
 // DeepGet gets a value from an object. The key may reference objects in dotted notation.

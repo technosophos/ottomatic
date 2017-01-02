@@ -1,6 +1,7 @@
 package ottomatic
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/robertkrimen/otto"
@@ -9,11 +10,12 @@ import (
 type OttoFn func(otto.FunctionCall) otto.Value
 
 type ObjectWithMethods struct {
-	Name   string             `otto:"name"`
-	Sum    func(int, int) int `otto:"sum"`
-	Inner  *InnerObject       `otto:"inner"`
-	SkipMe bool               `otto:"-"`
-	NoTag  int
+	Name      string             `otto:"name"`
+	Sum       func(int, int) int `otto:"sum"`
+	Inner     *InnerObject       `otto:"inner,alias=inside"`
+	SkipMe    bool               `otto:"-"`
+	NoTag     int
+	WithAlias bool `otto:"withAlias,alias=alias,alias=bananas"`
 }
 
 type InnerObject struct {
@@ -59,6 +61,22 @@ func TestDeepGet(t *testing.T) {
 	}
 }
 
+func ExampleRegister() {
+	o := otto.New()
+	Register("hello", "world", o)
+	res, err := DeepGet("hello", o)
+	if err != nil {
+		panic(err)
+	}
+
+	v, err := res.ToString()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(v)
+	// Output: world
+}
+
 func TestRegister(t *testing.T) {
 	o := otto.New()
 	Register("hello", "world", o)
@@ -102,11 +120,12 @@ func TestRegister_Func(t *testing.T) {
 func TestRegister_Struct(t *testing.T) {
 	o := otto.New()
 	owm := &ObjectWithMethods{
-		Name:   "astro",
-		Sum:    func(a, b int) int { return a + b },
-		Inner:  &InnerObject{Value: 42},
-		SkipMe: true,
-		NoTag:  24,
+		Name:      "astro",
+		Sum:       func(a, b int) int { return a + b },
+		Inner:     &InnerObject{Value: 42},
+		SkipMe:    true,
+		NoTag:     24,
+		WithAlias: true,
 	}
 
 	if err := Register("top", owm, o); err != nil {
@@ -181,5 +200,53 @@ func TestRegister_Struct(t *testing.T) {
 		t.Error("'myval' is undefined")
 	} else if ival, err := res.ToInteger(); ival != 31 {
 		t.Errorf("Expected 31, got %s (%s)", ival, err)
+	}
+}
+
+func TestRegisterToAliases(t *testing.T) {
+	o := otto.New()
+	owm := &ObjectWithMethods{
+		Name:      "astro",
+		Sum:       func(a, b int) int { return a + b },
+		Inner:     &InnerObject{Value: 42},
+		SkipMe:    true,
+		NoTag:     24,
+		WithAlias: true,
+	}
+
+	if err := Register("top", owm, o); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canary
+	script := `top.withAlias == true`
+	if out, err := o.Run(script); err != nil {
+		t.Fatalf("failed to run script %q: %v", script, err)
+	} else if ob, _ := out.ToBoolean(); !ob {
+		t.Errorf("Expected withAlias to resolve to true, got %v", out)
+	}
+
+	// Test that all aliases were correctly initialized.
+	script = `top.alias == true && top.withAlias == true && top.bananas == true`
+	if out, err := o.Run(script); err != nil {
+		t.Fatalf("failed to run script %q: %v", script, err)
+	} else if ob, _ := out.ToBoolean(); !ob {
+		t.Errorf("Expected alias conjunction to resolve to true, got %v", out)
+	}
+
+	// Test that values are correctly tracked separately.
+	script = `top.alias = false; top.withAlias`
+	if out, err := o.Run(script); err != nil {
+		t.Fatalf("failed to run script %q: %v", script, err)
+	} else if ob, _ := out.ToBoolean(); !ob {
+		t.Errorf("Expected alias = false to leave withAlias set to true, got %v", out)
+	}
+
+	// Test that references are correctly dereferenced.
+	script = `top.inner.value = 43; top.inside.value`
+	if out, err := o.Run(script); err != nil {
+		t.Fatalf("failed to run script %q: %v", script, err)
+	} else if ob, _ := out.ToInteger(); ob != 43 {
+		t.Errorf("Expected top.inside.value to be 43, got %v", out)
 	}
 }
