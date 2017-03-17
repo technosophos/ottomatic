@@ -1,5 +1,7 @@
 # Ottomatic: Annotation-based automatic binding for Otto
 
+[![Stability: Experimental](https://masterminds.github.io/stability/experimental.svg)](https://masterminds.github.io/stability/experimental.html)
+
 This library provides a simple way of binding a Go struct to a JavaScript
 definition for the [Otto](https://github.com/robertkrimen/otto) JavaScript runtime.
 
